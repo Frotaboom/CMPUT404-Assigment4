@@ -73,6 +73,8 @@ def flask_post_json():
 
 
 # https://stackoverflow.com/questions/25860304/how-do-i-set-response-headers-in-flask
+# for some reason, using these headers make the connection from localhost faster
+# otherwise, would need to connect to 127.0.0.1 for a fast connection
 @app.after_request
 def add_header(response):
     response.headers.add("Access-Control-Allow-Origin", "http://localhost:5000")
