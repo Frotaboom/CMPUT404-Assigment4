@@ -21,8 +21,9 @@
         limitations under the License.
     "/>
     <script src="json2.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lodash@4.17.10/lodash.min.js"></script> <!-- https://stackoverflow.com/questions/2253750/testing-two-json-objects-for-equality-ignoring-child-order-in-java --> 
   </head> 
-  <body bgcolor="black" height="100%" width="100%"> 
+  <body bgcolor="#FF69B4" height="100%" width="100%"> 
     <canvas id="c" width="100%" height="100%" style="-webkit-tap-highlight-color: transparent;"></canvas> 
     <script>
 var canvas = document.getElementById('c');
@@ -30,6 +31,13 @@ var host = window.location.host;
 var context = canvas.getContext("2d");
 var W = canvas.width  = window.innerWidth-6;
 var H = canvas.height = window.innerHeight-50;
+
+// https://stackoverflow.com/questions/14757659/loading-an-image-onto-a-canvas-with-javascript
+var backgroundImg = new Image();
+backgroundImg.onload = function () {
+    context.drawImage(backgroundImg, 0, 0, canvas.width, canvas.height); // reload on clear as well
+};
+backgroundImg.src = 'cloudBackground.png';
 
 
 function sendJSONXMLHTTPRequest(url, objects, callback) {
@@ -40,6 +48,7 @@ function sendJSONXMLHTTPRequest(url, objects, callback) {
                 if (xhr.status==200) {
                     //XXX: parse some JSON from the request!
                     //XXX: Pass the data to the callback!
+                    callback(JSON.parse(xhr.response))
                 }
             } 
             catch(e) {
@@ -48,8 +57,12 @@ function sendJSONXMLHTTPRequest(url, objects, callback) {
         }
     };
     //XXX: POST to a URL
+    xhr.open("POST", url);
     //XXX: set the mimetype and the accept headers!
     // Remember to use application/json !
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.send(JSON.stringify(objects));
 }
 
 
@@ -58,33 +71,66 @@ world = {};
 //XXX: TODO Make this prettier!
 function drawCircle(context,entity) {
     with(context) {
-        beginPath();              
-        lineWidth = 3;
         var x = entity["x"];
         var y = entity["y"];
-        //moveTo(x,y);
+        var width = 0.8*(entity["radius"] ? entity["radius"] : 55);
+        var height = 1.1*(entity["radius"] ? entity["radius"] : 55);
+
+        // https://stackoverflow.com/questions/58333678/draw-heart-using-javascript-in-any-postionx-y
+        save();
+        beginPath();
+
+        var topCurveHeight = height * 0.3;
+        moveTo(x, y + topCurveHeight);
+        // top left curve
+        bezierCurveTo(
+            x, y, 
+            x - width / 2, y, 
+            x - width / 2, y + topCurveHeight
+        );
+
+        // bottom left curve
+        bezierCurveTo(
+            x - width / 2, y + (height + topCurveHeight) / 2, 
+            x, y + (height + topCurveHeight) / 2, 
+            x, y + height
+        );
+
+        // bottom right curve
+        bezierCurveTo(
+            x, y + (height + topCurveHeight) / 2, 
+            x + width / 2, y + (height + topCurveHeight) / 2, 
+            x + width / 2, y + topCurveHeight
+        );
+
+        // top right curve
+        bezierCurveTo(
+            x + width / 2, y, 
+            x, y, 
+            x, y + topCurveHeight
+        );
+
+        closePath();
         fillStyle = entity["colour"];
-        strokeStyle = fillStyle;
-        arc(x, y, (entity["radius"])?entity["radius"]:50, 0, 2.0 * Math.PI, false);  
-        stroke();                                
+        fill();
+                      
     }
 }
 
 function prepEntity(entity) {
     if (!entity["colour"]) {
-        entity["colour"] = "#FF0000";
+        entity["colour"] = "#FF69B4";
     }
-    if (!entity["radius"]) {
-        entity["radius"] = 50;
+    if (!entity["radius"] || entity["colour"] !== "#FF69B4") {
+        entity["radius"] = 55;
     }
     return entity;
 }
 
 function clearFrame() {
     with(context) {
-	moveTo(0,0);
-	fillStyle = "#000";
-	fillRect(0,0,W,H);
+        moveTo(0,0);
+        context.drawImage(backgroundImg, 0, 0, canvas.width, canvas.height);
     }
 
 }
@@ -136,8 +182,13 @@ function getPosition(e) {
 
 function addEntity(entity, data) {
     world[entity] = data;
-    drawNextFrame(); // (but should we?)
+    drawNextFrame(); // (but should we?) yes. We want everyone to see each new entity
     //XXX: Send a XHTML Request that updates the entity you just  modified!
+    sendJSONXMLHTTPRequest(`http://127.0.0.1:5000/entity/${entity}`, data, 
+        (response) => {
+            world[entity] = response
+        }
+    );
 
 }
 
@@ -247,7 +298,7 @@ mouse = (function() {
 // Add the application specific mouse listeners!
 //XXX: TODO Make these prettier!
 mouse.mousedowners.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'blue'});
+    addEntityWithoutName({'x':x,'y':y,'colour':'red'});
 });
 
 mouse.mouseuppers.push(function(x,y,clicked,e) {
@@ -255,13 +306,36 @@ mouse.mouseuppers.push(function(x,y,clicked,e) {
 });
 
 mouse.mousedraggers.push(function(x,y,clicked,e) {
-    addEntityWithoutName({'x':x,'y':y,'colour':'green',
-                          'radius':10});
+    addEntityWithoutName({'x':x,'y':y,'colour':'#FF69B4', 'radius':25});
 });
 
 
 function update() {
     //XXX: TODO Get the world from the webservice using a XMLHTTPRequest
+    var xhr = new XMLHttpRequest();
+    // copied from sendJSONXMLHTTPRequest
+    xhr.onreadystatechange = function () {
+        if (xhr.readyState==4) {
+            try {
+                if (xhr.status==200) {
+                    data = JSON.parse(xhr.response)
+                    // only draw next frame if data has changed
+                    if (! _.isEqual(data, world)) {
+                        world = {...JSON.parse(xhr.response)}
+                        drawNextFrame()
+                    }
+                }
+            } 
+            catch(e) {
+                alert('Error: ' + e.name);
+            }
+        }
+    };
+
+    xhr.open("GET", "http://127.0.0.1:5000/world");
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.send();
+
     drawFrame();
 }
 
